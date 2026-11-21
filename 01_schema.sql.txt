@@ -1,0 +1,173 @@
+DROP DATABASE IF EXISTS wypozyczalnia_sportowa;
+CREATE DATABASE wypozyczalnia_sportowa CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE wypozyczalnia_sportowa;
+ 
+CREATE TABLE klienci
+(
+  id_klienta INT AUTO_INCREMENT NOT NULL PRIMARY KEY,
+  imie VARCHAR(50) NOT NULL,
+  nazwisko VARCHAR(50) NOT NULL,
+  email VARCHAR(100) NOT NULL UNIQUE,
+  telefon VARCHAR(20) NOT NULL,
+  nr_dokumentu VARCHAR(20) NOT NULL UNIQUE,
+  status_konta ENUM('aktywny', 'zablokowany') NOT NULL DEFAULT 'aktywny',
+  data_rejestracji DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE pracownicy
+(
+  id_pracownika INT AUTO_INCREMENT PRIMARY KEY,
+  imie VARCHAR(50) NOT NULL,
+  nazwisko VARCHAR(50) NOT NULL,
+  stanowisko ENUM('obsluga', 'serwisant', 'kierownik') NOT NULL DEFAULT 'obsluga',
+  data_zatrudnienia DATE DEFAULT (CURDATE())
+);
+
+CREATE TABLE kategorie_sprzetu
+(
+  id_kategorii INT AUTO_INCREMENT PRIMARY KEY,
+  nazwa VARCHAR(100) NOT NULL UNIQUE,
+  opis TEXT
+);
+
+CREATE TABLE modele_sprzetu
+(
+  id_modelu INT AUTO_INCREMENT PRIMARY KEY,
+  id_kategorii INT NOT NULL,
+  producent VARCHAR(100) NOT NULL,
+  nazwa_modelu VARCHAR(100) NOT NULL,
+  rozmiar_parametry VARCHAR(50) NOT NULL,
+  kaucja_zwrotna DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  
+  CONSTRAINT chk_kaucja CHECK (kaucja_zwrotna >= 0),
+  CONSTRAINT fk_modele_kategorie
+    FOREIGN KEY (id_kategorii) REFERENCES kategorie_sprzetu(id_kategorii)
+    ON UPDATE CASCADE
+    ON DELETE RESTRICT
+);
+
+CREATE TABLE historia_cennika
+(
+  id_ceny INT AUTO_INCREMENT PRIMARY KEY,
+  id_modelu INT NOT NULL,
+  stawka_dzienna DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  obowiazuje_od DATETIME NOT NULL,
+  obowiazuje_do DATETIME NULL,
+  
+  CONSTRAINT chk_daty_obowiazywania CHECK (obowiazuje_do >= obowiazuje_od),
+  CONSTRAINT chk_stawka_dzienna CHECK (stawka_dzienna >= 0),
+  CONSTRAINT fk_historiaCennika_modeleSprzetu
+    FOREIGN KEY (id_modelu) REFERENCES modele_sprzetu(id_modelu)
+    ON UPDATE CASCADE
+    ON DELETE RESTRICT
+);
+
+CREATE TABLE egzemplarze_sprzetu
+(
+  id_egzemplarza INT AUTO_INCREMENT PRIMARY KEY,
+  id_modelu INT NOT NULL,
+  numer_seryjny VARCHAR(50) NOT NULL UNIQUE,
+  stan_techniczny ENUM('nowy', 'bardzo_dobry', 'dobry', 'wymaga_serwisu', 'uszkodzony') NOT NULL DEFAULT 'bardzo_dobry',
+  status_dostepnosci ENUM('dostepny', 'wypozyczony', 'zarezerwowany', 'w_serwisie', 'wycofany') NOT NULL DEFAULT 'dostepny',
+  
+  CONSTRAINT fk_egzemplarzeSprzetu_modeleSprzetu
+    FOREIGN KEY (id_modelu) REFERENCES modele_sprzetu(id_modelu)
+      ON UPDATE CASCADE
+      ON DELETE RESTRICT
+);
+
+CREATE TABLE przeglady_serwisowe
+(
+  id_przegladu INT AUTO_INCREMENT PRIMARY KEY,
+  id_egzemplarza INT NOT NULL,
+  id_pracownika INT NOT NULL,
+  data_rozpoczecia DATETIME NOT NULL,
+  data_zakonczenia DATETIME NULL,
+  opis_prac VARCHAR(200) NOT NULL,
+  koszt_serwisu DECIMAL(10,2) NOT NULL,
+  
+  CONSTRAINT chk_daty_serwisowania CHECK (data_zakonczenia >= data_rozpoczecia),
+  CONSTRAINT chk_koszt_serwisu CHECK (koszt_serwisu >= 0),
+  CONSTRAINT fk_egzemplarzeSprzetu_przegladySerwisowe
+    FOREIGN KEY (id_egzemplarza) REFERENCES egzemplarze_sprzetu(id_egzemplarza)
+      ON UPDATE CASCADE
+      ON DELETE RESTRICT,
+   CONSTRAINT fk_pracownicy_przegladySerwisowe
+    FOREIGN KEY (id_pracownika) REFERENCES pracownicy(id_pracownika)
+      ON UPDATE CASCADE
+      ON DELETE RESTRICT
+);
+        
+
+
+CREATE TABLE wypozyczenia
+(
+  id_wypozyczenia INT AUTO_INCREMENT PRIMARY KEY,
+  id_klienta INT NOT NULL,
+  id_pracownika_wydajacego INT NOT NULL,
+  data_wypozyczenia DATETIME NOT NULL,
+  planowana_data_zwrotu DATETIME NOT NULL,
+  faktyczna_data_zwrotu DATETIME NULL,
+  status ENUM('zarezerwowane', 'w_trakcie', 'zakonczone', 'opoznione', 'anulowane') NOT NULL DEFAULT 'w_trakcie',
+  
+  CONSTRAINT chk_daty_wypozyczenia CHECK (planowana_data_zwrotu >= data_wypozyczenia),
+  CONSTRAINT chk_faktyczny_zwrot CHECK (faktyczna_data_zwrotu >= data_wypozyczenia),
+  CONSTRAINT fk_wypozyczenia_klienci
+    FOREIGN KEY (id_klienta) REFERENCES klienci(id_klienta)
+      ON UPDATE CASCADE
+      ON DELETE RESTRICT,
+  CONSTRAINT fk_wypozyczenia_pracownicy
+    FOREIGN KEY (id_pracownika_wydajacego) REFERENCES pracownicy(id_pracownika)
+      ON UPDATE CASCADE
+      ON DELETE RESTRICT
+);
+
+CREATE TABLE pozycje_wypozyczenia
+(
+  id_pozycji INT AUTO_INCREMENT PRIMARY KEY,
+  id_wypozyczenia INT NOT NULL,
+  id_egzemplarza INT NOT NULL,
+  naliczona_stawka_dzienna DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  uwagi_przy_zwrocie TEXT NULL,
+
+  CONSTRAINT chk_naliczona_stawka CHECK (naliczona_stawka_dzienna >= 0),
+  CONSTRAINT fk_pozycjeWypozyczenia_wypozyczenia
+    FOREIGN KEY (id_wypozyczenia) REFERENCES wypozyczenia(id_wypozyczenia)
+    ON UPDATE CASCADE
+    ON DELETE CASCADE,
+  CONSTRAINT fk_pozycjeWypozyczenia_egzemplarzeSprzetu
+    FOREIGN KEY (id_egzemplarza) REFERENCES egzemplarze_sprzetu(id_egzemplarza)
+    ON UPDATE CASCADE
+    ON DELETE RESTRICT
+);
+
+CREATE TABLE platnosci
+(
+  id_platnosci INT AUTO_INCREMENT PRIMARY KEY,
+  id_wypozyczenia INT NOT NULL,
+  typ_platnosci ENUM('oplata_za_wypozyczenie', 'kaucja', 'zwrot_kaucji', 'kara_umowna', 'doplata') NOT NULL,
+  kwota DECIMAL(10,2) NOT NULL,
+  metoda ENUM('gotowka', 'karta', 'blik', 'przelew') NOT NULL,
+  data_platnosci DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+  CONSTRAINT chk_kwota_platnosci CHECK (kwota > 0),
+  CONSTRAINT fk_platnosci_wypozyczenia
+    FOREIGN KEY (id_wypozyczenia) REFERENCES wypozyczenia(id_wypozyczenia)
+    ON UPDATE CASCADE
+    ON DELETE RESTRICT
+);
+
+CREATE TABLE historia_statusow_sprzetu
+(
+  id_logu INT AUTO_INCREMENT PRIMARY KEY,
+  data_zmiany DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  id_egzemplarza INT NOT NULL,
+  stary_status VARCHAR(50) NOT NULL,
+  nowy_status VARCHAR(50) NOT NULL,
+  komentarz VARCHAR(255) NULL,
+
+  CONSTRAINT fk_historiaStatusow_egzemplarzeSprzetu
+    FOREIGN KEY (id_egzemplarza) REFERENCES egzemplarze_sprzetu(id_egzemplarza)
+    ON UPDATE CASCADE
+    ON DELETE CASCADE
+);
